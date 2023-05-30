@@ -8,9 +8,9 @@ import torch
 import torch.nn as nn
 
 from ultralytics.nn.modules import (AIFI, C1, C2, C3, C3TR, SPP, SPPF, Bottleneck, BottleneckCSP, C2f, C3Ghost, C3x,
-                                    Classify, Concat, Conv, ConvTranspose, Detect, DWConv, DWConvTranspose2d, Focus,
-                                    GhostBottleneck, GhostConv, HGBlock, HGStem, Pose, RepC3, RepConv, RTDETRDecoder,
-                                    Segment)
+                                    Classify, Classify_netspresso, Concat, Conv, ConvTranspose, Detect, Detect_netspresso, DWConv, DWConvTranspose2d, Focus,
+                                    GhostBottleneck, GhostConv, HGBlock, HGStem, Pose, Pose_netspresso, RepC3, RepConv, RTDETRDecoder,
+                                    Segment, Segment_netspresso)
 from ultralytics.yolo.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.yolo.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.yolo.utils.plotting import feature_visualization
@@ -248,6 +248,36 @@ class DetectionModel(BaseModel):
         i = (y[-1].shape[-1] // g) * sum(4 ** (nl - 1 - x) for x in range(e))  # indices
         y[-1] = y[-1][..., i:]  # small
         return y
+    
+    
+class DetectionModel_netspresso(BaseModel):
+    """YOLOv8 detection model."""
+    def __init__(self, graph_model_path='/home/compressed_fd_compressed_fd_model.pt' , meta_head_json='for_netspresso.json'):  # model, input channels, number of classes
+        super().__init__()
+        import json
+        with open(meta_head_json) as f:
+            netspresso_head_meta = json.load(f)
+        self.json_head = netspresso_head_meta
+
+        # Define model
+        nc = self.json_head['nc']
+        nl = self.json_head['nl']
+        anchors = torch.Tensor(self.json_head['anchors'])
+        strides = torch.Tensor(self.json_head['strides'])
+        stride = torch.Tensor(self.json_head['stride'])
+        
+        self.stride = stride
+        self.model = torch.load(graph_model_path)
+        self.names = {i: f'{i}' for i in range(nc)}  # default names dict
+        self.inplace = self.json_head.get('inplace', True)
+        
+        self.head = Detect_netspresso(nc=nc, nl=nl, anchors=anchors, strides=strides, stride=stride)
+        
+        self.model = nn.Sequential(self.model,self.head)
+
+    def forward(self, x, augment=False, profile=False, visualize=False):
+        """Run forward pass on input image(s) with optional augmentation and profiling."""
+        return self.model(x)
 
 
 class SegmentationModel(DetectionModel):
@@ -256,6 +286,37 @@ class SegmentationModel(DetectionModel):
     def __init__(self, cfg='yolov8n-seg.yaml', ch=3, nc=None, verbose=True):
         """Initialize YOLOv8 segmentation model with given config and parameters."""
         super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
+
+    def _forward_augment(self, x):
+        """Undocumented function."""
+        raise NotImplementedError(emojis('WARNING ⚠️ SegmentationModel has not supported augment inference yet!'))
+
+
+class SegmentationModel_netspresso(DetectionModel_netspresso):
+    """YOLOv8 segmentation model."""
+    def __init__(self, graph_model_path='/home/compressed_fd_compressed_fd_model.pt' , meta_head_json='for_netspresso.json'):  # model, input channels, number of classes
+        super().__init__(graph_model_path=graph_model_path , meta_head_json=meta_head_json)
+        import json
+        with open(meta_head_json) as f:
+            netspresso_head_meta = json.load(f)
+        self.json_head = netspresso_head_meta
+
+        nm = self.json_head['nm']
+        npr = self.json_head['npr']
+        nc = self.json_head['nc']
+        nl = self.json_head['nl']
+        anchors = self.json_head['anchors']
+        strides = self.json_head['strides']
+        stride = self.json_head['stride']
+
+        self.model = torch.load(graph_model_path)
+        self.names = {i: f'{i}' for i in range(nc)}  # default names dict
+        self.inplace = self.json_head.get('inplace', True)
+
+        self.head = Segment_netspresso(nc=nc, nm=nm, npr=npr, nl=nl, anchors=anchors, strides=strides, stride=stride)
+        
+        # Build new model for retraining
+        self.model = nn.Sequential(self.model,self.head).cuda()
 
     def _forward_augment(self, x):
         """Undocumented function."""
@@ -273,6 +334,33 @@ class PoseModel(DetectionModel):
             LOGGER.info(f"Overriding model.yaml kpt_shape={cfg['kpt_shape']} with kpt_shape={data_kpt_shape}")
             cfg['kpt_shape'] = data_kpt_shape
         super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
+
+
+class PoseModel_netspresso(DetectionModel_netspresso):
+    """YOLOv8 pose model."""
+    def __init__(self, graph_model_path='/home/compressed_fd_compressed_fd_model.pt' , meta_head_json='for_netspresso.json'):
+        """Initialize YOLOv8 Pose model."""
+        super().__init__(graph_model_path=graph_model_path , meta_head_json=meta_head_json)
+        import json
+        with open(meta_head_json) as f:
+            netspresso_head_meta = json.load(f)
+        self.json_head = netspresso_head_meta
+
+        kpt_shape = self.json_head['kpt_shape']
+        nc = self.json_head['nc']
+        nl = self.json_head['nl']
+        anchors = self.json_head['anchors']
+        strides = self.json_head['strides']
+        stride = self.json_head['stride']
+
+        self.model = torch.load(graph_model_path)
+        self.names = {i: f'{i}' for i in range(nc)}  # default names dict
+        self.inplace = self.json_head.get('inplace', True)
+
+        self.head = Pose_netspresso(kpt_shape=kpt_shape, nc=nc, nl=nl, anchors=anchors, strides=strides, stride=stride)
+
+        # Build new model for retraining
+        self.model = nn.Sequential(self.model,self.head).cuda()
 
 
 class ClassificationModel(BaseModel):
@@ -319,6 +407,47 @@ class ClassificationModel(BaseModel):
         self.stride = torch.Tensor([1])  # no stride constraints
         self.names = {i: f'{i}' for i in range(self.yaml['nc'])}  # default names dict
         self.info()
+
+    @staticmethod
+    def reshape_outputs(model, nc):
+        """Update a TorchVision classification model to class count 'n' if required."""
+        name, m = list((model.model if hasattr(model, 'model') else model).named_children())[-1]  # last module
+        if isinstance(m, Classify):  # YOLO Classify() head
+            if m.linear.out_features != nc:
+                m.linear = nn.Linear(m.linear.in_features, nc)
+        elif isinstance(m, nn.Linear):  # ResNet, EfficientNet
+            if m.out_features != nc:
+                setattr(model, name, nn.Linear(m.in_features, nc))
+        elif isinstance(m, nn.Sequential):
+            types = [type(x) for x in m]
+            if nn.Linear in types:
+                i = types.index(nn.Linear)  # nn.Linear index
+                if m[i].out_features != nc:
+                    m[i] = nn.Linear(m[i].in_features, nc)
+            elif nn.Conv2d in types:
+                i = types.index(nn.Conv2d)  # nn.Conv2d index
+                if m[i].out_channels != nc:
+                    m[i] = nn.Conv2d(m[i].in_channels, nc, m[i].kernel_size, m[i].stride, bias=m[i].bias is not None)
+
+
+class ClassificationModel_netspresso(BaseModel):
+    """YOLOv8 classification model."""
+        
+    def __init__(self, graph_model_path='/home/compressed_fd_compressed_fd_model.pt' , meta_head_json='for_netspresso.json'):
+        super().__init__()
+        import json
+        with open(meta_head_json) as f:
+            netspresso_head_meta = json.load(f)
+        self.json_head = netspresso_head_meta
+
+        # Define model
+        self.nc = self.json_head['nc']
+        self.stride = torch.Tensor(self.json_head['stride'])
+        self.model = torch.load(graph_model_path)
+        self.names = {i: f'{i}' for i in range(self.nc)}  # default names dict
+        
+        self.head = Classify_netspresso()
+        self.model = nn.Sequential(self.model,self.head)
 
     @staticmethod
     def reshape_outputs(model, nc):

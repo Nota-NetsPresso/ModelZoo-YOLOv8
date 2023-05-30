@@ -78,6 +78,13 @@ class AutoBackend(nn.Module):
         """
         super().__init__()
         w = str(weights[0] if isinstance(weights, list) else weights)
+        try:
+            temp = torch.load(weights)
+            temp_model = temp["model"]
+            if "netspresso" in temp_model.__class__.__name__:
+                weights = temp_model
+        except:
+            pass
         nn_module = isinstance(weights, torch.nn.Module)
         pt, jit, onnx, xml, engine, coreml, saved_model, pb, tflite, edgetpu, tfjs, paddle, triton = self._model_type(w)
         fp16 &= pt or jit or onnx or engine or nn_module or triton  # FP16

@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Union
 
 from ultralytics import yolo  # noqa
-from ultralytics.nn.tasks import (ClassificationModel, DetectionModel, PoseModel, SegmentationModel,
+from ultralytics.nn.tasks import (ClassificationModel, ClassificationModel_netspresso, DetectionModel, DetectionModel_netspresso,
+                                  PoseModel, PoseModel_netspresso, SegmentationModel, SegmentationModel_netspresso,
                                   attempt_load_one_weight, guess_model_task, nn, yaml_model_load)
 from ultralytics.yolo.cfg import get_cfg
 from ultralytics.yolo.engine.exporter import Exporter
@@ -20,13 +21,23 @@ TASK_MAP = {
     'classify': [
         ClassificationModel, yolo.v8.classify.ClassificationTrainer, yolo.v8.classify.ClassificationValidator,
         yolo.v8.classify.ClassificationPredictor],
+    'classify_retraining': [
+        ClassificationModel_netspresso, yolo.v8.classify.ClassificationTrainer, yolo.v8.classify.ClassificationValidator,
+        yolo.v8.classify.ClassificationPredictor],
     'detect': [
         DetectionModel, yolo.v8.detect.DetectionTrainer, yolo.v8.detect.DetectionValidator,
+        yolo.v8.detect.DetectionPredictor],
+    'detect_retraining': [
+        DetectionModel_netspresso, yolo.v8.detect.DetectionTrainer, yolo.v8.detect.DetectionValidator,
         yolo.v8.detect.DetectionPredictor],
     'segment': [
         SegmentationModel, yolo.v8.segment.SegmentationTrainer, yolo.v8.segment.SegmentationValidator,
         yolo.v8.segment.SegmentationPredictor],
-    'pose': [PoseModel, yolo.v8.pose.PoseTrainer, yolo.v8.pose.PoseValidator, yolo.v8.pose.PosePredictor]}
+    'segment_retraining': [
+        SegmentationModel_netspresso, yolo.v8.segment.SegmentationTrainer, yolo.v8.segment.SegmentationValidator,
+        yolo.v8.segment.SegmentationPredictor],
+    'pose': [PoseModel, yolo.v8.pose.PoseTrainer, yolo.v8.pose.PoseValidator, yolo.v8.pose.PosePredictor],
+    'pose_retraining': [PoseModel_netspresso, yolo.v8.pose.PoseTrainer, yolo.v8.pose.PoseValidator, yolo.v8.pose.PosePredictor]}
 
 
 class YOLO:
@@ -338,6 +349,54 @@ class YOLO:
         args = get_cfg(cfg=DEFAULT_CFG, overrides=overrides)
         args.task = self.task
         return Exporter(overrides=args, _callbacks=self.callbacks)(model=self.model)
+    
+    def export_netspresso(self):
+        """
+        Export model for NetsPresso.
+        """
+        self._check_is_pytorch_model()
+        #model_model 부분 torchfx로 변환 저장
+        import torch
+        import torch.fx as fx
+        import json
+        
+        self.model.train()
+        _graph = fx.Tracer().trace(self.model, {'augment': False, 'profile':False, 'visualize':False})
+        traced_model = fx.GraphModule(self.model, _graph)
+        torch.save(traced_model, "./model_fx.pt")
+        
+        #head 부분에 대한 config 저장
+        model_head = self.model.model[-1]
+        
+        if 'classify' in self.task:
+            task_name = 'classify'
+        elif 'detect' in self.task:
+            task_name = 'detect'
+        elif 'segment' in self.task:
+            task_name = 'segment'
+        elif 'pose' in self.task:
+            task_name = 'pose'
+            
+        total_dict = {'classify':['nc', 'stride'],  'detect':['nc', 'nl', 'anchors', 'stride', 'strides', 'inplace'],
+                      'segment' : ['nm', 'npr', 'nc', 'nl', 'anchors', 'stride', 'strides', 'inplace'],
+                      'pose' : ['kpt_shape', 'nc', 'nl', 'anchors', 'stride', 'strides', 'inplace']}
+        
+        attribute_list = total_dict[task_name]
+        head_meta = {}
+        for attribute in attribute_list:
+            if attribute == 'inplace':
+                head_meta[attribute] = True
+            else:
+                temp_attribute = getattr(model_head, attribute)
+                if isinstance(temp_attribute, torch.Tensor):
+                    head_meta[attribute] = temp_attribute.cpu().numpy().tolist()
+                else:
+                    head_meta[attribute] = temp_attribute
+            
+        with open('./netspresso_head_meta.json', 'w') as f:
+            json.dump(head_meta, f, indent=2)
+            
+        model_head.training = True
 
     def train(self, **kwargs):
         """
@@ -501,3 +560,83 @@ class YOLO:
         """Reset all registered callbacks."""
         for event in callbacks.default_callbacks.keys():
             self.callbacks[event] = [callbacks.default_callbacks[event][0]]
+
+class YOLO_netspresso(YOLO):
+    """
+    YOLO (You Only Look Once) object detection model.
+    """
+
+    def __init__(self, compressed_model="/home/compressed_fd_compressed_fd_model.pt", head_meta="/home/yolov8/netspresso_detect_meta.json", task=None, meta_config="/home/yolov8/netspresso_yolo_v2/netspresso_yolo_v22/args.yaml") -> None:
+        """
+        Initializes the YOLO model.
+
+        Args:
+            model (Union[str, Path], optional): Path or name of the model to load or create. Defaults to 'yolov8n.pt'.
+            task (Any, optional): Task type for the YOLO model. Defaults to None.
+        """
+        self.callbacks = callbacks.get_default_callbacks()
+        self.predictor = None  # reuse predictor
+        self.model = None  # model object
+        self.trainer = None  # trainer object
+        self.task = task  # task type
+        self.ckpt = None  # if loaded from *.pt
+        self.cfg = None  # if loaded from *.yaml
+        self.ckpt_path = None
+        self.overrides = {}  # overrides for trainer object
+        self.metrics = None  # validation/training metrics
+        self.session = None  # HUB session
+        
+        if self.task not in ["classify_retraining", "detect_retraining", "segment_retraining", "pose_retraining"]:
+            raise NotImplementedError(f"'{self.task}' task not implemented")
+        
+        self._load_compressed_model(compressed_model, head_meta, meta_config)
+        
+    def _load_compressed_model(self, compressed_weights: str, head_meta: str, meta_config: str):
+        """
+        Initializes a new model and infers the task type from the model definitions.
+        """
+        
+        #ckpt = check_yaml(meta_config)  # check YAML
+        #ckpt = yaml_load(meta_config, append_filename=True)  # model dict s
+        self.ckpt = None
+        
+        cfg_dict = yaml_model_load(meta_config)
+        self.cfg = meta_config
+        self.model = TASK_MAP[self.task][0](graph_model_path=compressed_weights, meta_head_json=head_meta)  # build model
+        self.overrides['model'] = self.cfg
+
+        # Below added to allow export from yamls
+        args = {**DEFAULT_CFG_DICT, **self.overrides}  # combine model and default args, preferring model args
+        self.model.args = {k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS}  # attach args to model
+        self.model.task = self.task
+        self.overrides['task'] = self.task
+
+    def train(self, **kwargs):
+        """
+        Trains the model on a given dataset.
+
+        Args:
+            **kwargs (Any): Any number of arguments representing the training configuration.
+        """
+        self._check_is_pytorch_model()
+        check_pip_update_available()
+        overrides = self.overrides.copy()
+        overrides.update(kwargs)
+        if kwargs.get('cfg'):
+            LOGGER.info(f"cfg file passed. Overriding default params with {kwargs['cfg']}.")
+            overrides = yaml_load(check_yaml(kwargs['cfg']))
+        overrides['mode'] = 'train'
+        if not overrides.get('data'):
+            raise AttributeError("Dataset required but missing, i.e. pass 'data=coco128.yaml'")
+        if overrides.get('resume'):
+            overrides['resume'] = self.ckpt_path
+        self.task = self.task or overrides.get('task')
+        self.trainer = TASK_MAP[self.task][1](overrides=overrides, _callbacks=self.callbacks)
+        self.trainer.model = self.model
+        self.trainer.hub_session = self.session  # attach optional HUB session
+        self.trainer.train()
+        # Update model and cfg after training
+        if RANK in (-1, 0):
+            self.model, _ = attempt_load_one_weight(str(self.trainer.best))
+            self.overrides = self.model.args
+            self.metrics = getattr(self.trainer.validator, 'metrics', None)  # TODO: no metrics returned by DDP

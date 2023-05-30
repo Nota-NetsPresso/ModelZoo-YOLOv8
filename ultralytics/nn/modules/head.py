@@ -71,6 +71,47 @@ class Detect(nn.Module):
             b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
 
 
+class Detect_netspresso(nn.Module):
+    """YOLOv8 Detect head for detection models."""
+    dynamic = False  # force grid reconstruction
+    export = False  # export mode
+    shape = None
+    
+    def __init__(self, nc=80, nl=3, anchors=None, strides=None, stride=None):  # detection layer
+        super().__init__()
+        self.nc = nc  # number of classes
+        self.nl = nl  # number of detection layers
+        self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
+        self.no = nc + self.reg_max * 4  # number of outputs per anchor
+        
+        self.stride = stride
+        self.strides = strides
+        self.anchors = anchors
+        self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+
+    def forward(self, x):
+        """Concatenates and returns predicted bounding boxes and class probabilities."""
+        shape = x[0].shape  # BCHW
+        if self.training:
+            return x
+        elif self.dynamic or self.shape != shape:
+            self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
+            self.shape = shape
+
+        x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
+        if self.export and self.format in ('saved_model', 'pb', 'tflite', 'edgetpu', 'tfjs'):  # avoid TF FlexSplitV ops
+            box = x_cat[:, :self.reg_max * 4]
+            cls = x_cat[:, self.reg_max * 4:]
+        else:
+            box, cls = x_cat.split((self.reg_max * 4, self.nc), 1)
+        dbox = dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
+        y = torch.cat((dbox, cls.sigmoid()), 1)
+        return y if self.export else (y, x)
+
+    def bias_init(self):
+        pass
+    
+    
 class Segment(Detect):
     """YOLOv8 Segment head for segmentation models."""
 
@@ -92,6 +133,25 @@ class Segment(Detect):
 
         mc = torch.cat([self.cv4[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2)  # mask coefficients
         x = self.detect(self, x)
+        if self.training:
+            return x, mc, p
+        return (torch.cat([x, mc], 1), p) if self.export else (torch.cat([x[0], mc], 1), (x[1], mc, p))
+
+
+class Segment_netspresso(Detect_netspresso):
+    """YOLOv8 Segment head for segmentation models."""
+
+    def __init__(self, nc=80, nm=32, npr=256, nl=3, anchors=None, strides=None, stride=None):
+        """Initialize the YOLO model attributes such as the number of masks, prototypes, and the convolution layers."""
+        super().__init__(nc, nl=nl, anchors=anchors, strides=strides, stride=stride)
+        self.nm = nm  # number of masks
+        self.npr = npr  # number of protos
+        
+
+    def forward(self, x):
+        """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
+        x, mc, p  = x
+        
         if self.training:
             return x, mc, p
         return (torch.cat([x, mc], 1), p) if self.export else (torch.cat([x[0], mc], 1), (x[1], mc, p))
@@ -138,6 +198,42 @@ class Pose(Detect):
             return y
 
 
+class Pose_netspresso(Detect_netspresso):
+    """YOLOv8 Pose head for keypoints models."""
+
+    def __init__(self, kpt_shape=None, nc=80, nl=3, anchors=None, strides=None, stride=None):
+        """Initialize YOLO network with default parameters and Convolutional Layers."""
+        super().__init__(nc, nl=nl, anchors=anchors, strides=strides, stride=stride)
+        self.kpt_shape = kpt_shape  # number of keypoints, number of dims (2 for x,y or 3 for x,y,visible)
+        self.nk = kpt_shape[0] * kpt_shape[1]  # number of keypoints total
+
+    def forward(self, x):
+        """Perform forward pass through YOLO model and return predictions."""
+        x, kpt = x
+        bs = x[0].shape[0]  # batch size
+        if self.training:
+            return x, kpt
+        pred_kpt = self.kpts_decode(bs, kpt)
+        return torch.cat([x, pred_kpt], 1) if self.export else (torch.cat([x[0], pred_kpt], 1), (x[1], kpt))
+
+    def kpts_decode(self, bs, kpts):
+        """Decodes keypoints."""
+        ndim = self.kpt_shape[1]
+        if self.export:  # required for TFLite export to avoid 'PLACEHOLDER_FOR_GREATER_OP_CODES' bug
+            y = kpts.view(bs, *self.kpt_shape, -1)
+            a = (y[:, :, :2] * 2.0 + (self.anchors - 0.5)) * self.strides
+            if ndim == 3:
+                a = torch.cat((a, y[:, :, 2:3].sigmoid()), 2)
+            return a.view(bs, self.nk, -1)
+        else:
+            y = kpts.clone()
+            if ndim == 3:
+                y[:, 2::3].sigmoid_()  # inplace sigmoid
+            y[:, 0::ndim] = (y[:, 0::ndim] * 2.0 + (self.anchors[0] - 0.5)) * self.strides
+            y[:, 1::ndim] = (y[:, 1::ndim] * 2.0 + (self.anchors[1] - 0.5)) * self.strides
+            return y
+        
+        
 class Classify(nn.Module):
     """YOLOv8 classification head, i.e. x(b,c1,20,20) to x(b,c2)."""
 
@@ -157,6 +253,17 @@ class Classify(nn.Module):
         return x if self.training else x.softmax(1)
 
 
+class Classify_netspresso(nn.Module):
+    """YOLOv8 classification head, i.e. x(b,c1,20,20) to x(b,c2)."""
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        """Performs a forward pass of the YOLO model on input image data."""
+        return x if self.training else x.softmax(1)
+    
+    
 class RTDETRDecoder(nn.Module):
 
     def __init__(
