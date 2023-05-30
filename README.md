@@ -1,5 +1,13 @@
 <div align="center">
   <p>
+    <a align="center" href="README.netspresso.md" target="_blank">
+      <img width="100%" src="./imgs/yolov8_banner1.png"></a>
+  </p>
+
+</div>
+
+<div align="center">
+  <p>
     <a href="https://ultralytics.com/yolov8" target="_blank">
       <img width="100%" src="https://raw.githubusercontent.com/ultralytics/assets/main/yolov8/banner-yolov8.png"></a>
   </p>
