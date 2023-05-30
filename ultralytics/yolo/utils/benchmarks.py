@@ -103,13 +103,13 @@ def benchmark(model=Path(SETTINGS['weights_dir']) / 'yolov8n.pt',
             export.predict(ROOT / 'assets/bus.jpg', imgsz=imgsz, device=device, half=half)
 
             # Validate
-            if model.task == 'detect':
+            if 'detect' in model.task:
                 data, key = 'coco8.yaml', 'metrics/mAP50-95(B)'
-            elif model.task == 'segment':
+            elif 'segment' in model.task:
                 data, key = 'coco8-seg.yaml', 'metrics/mAP50-95(M)'
-            elif model.task == 'classify':
+            elif 'classify' in model.task:
                 data, key = 'imagenet100', 'metrics/accuracy_top5'
-            elif model.task == 'pose':
+            elif 'pose' in model.task:
                 data, key = 'coco8-pose.yaml', 'metrics/mAP50-95(P)'
 
             results = export.val(data=data,

@@ -59,7 +59,7 @@ from pathlib import Path
 import torch
 
 from ultralytics.nn.autobackend import check_class_names
-from ultralytics.nn.modules import C2f, Detect, Segment
+from ultralytics.nn.modules import C2f, Detect, Segment, Detect_netspresso, Segment_netspresso
 from ultralytics.nn.tasks import DetectionModel, SegmentationModel
 from ultralytics.yolo.cfg import get_cfg
 from ultralytics.yolo.utils import (DEFAULT_CFG, LINUX, LOGGER, MACOS, __version__, callbacks, colorstr,
@@ -172,9 +172,12 @@ class Exporter:
 
         # Input
         im = torch.zeros(self.args.batch, 3, *self.imgsz).to(self.device)
-        file = Path(getattr(model, 'pt_path', None) or getattr(model, 'yaml_file', None) or model.yaml['yaml_file'])
-        if file.suffix == '.yaml':
-            file = Path(file.name)
+        try:
+            file = Path(getattr(model, 'pt_path', None) or getattr(model, 'yaml_file', None) or model.yaml['yaml_file'])
+            if file.suffix == '.yaml':
+                file = Path(file.name)
+        except:
+            file = Path("./export_model")
 
         # Update model
         model = deepcopy(model).to(self.device)
@@ -184,7 +187,7 @@ class Exporter:
         model.float()
         model = model.fuse()
         for k, m in model.named_modules():
-            if isinstance(m, (Detect, Segment)):
+            if isinstance(m, (Detect, Segment, Detect_netspresso, Segment_netspresso)):
                 m.dynamic = self.args.dynamic
                 m.export = True
                 m.format = self.args.format
@@ -208,7 +211,10 @@ class Exporter:
         self.model = model
         self.file = file
         self.output_shape = tuple(y.shape) if isinstance(y, torch.Tensor) else tuple(tuple(x.shape) for x in y)
-        self.pretty_name = Path(self.model.yaml.get('yaml_file', self.file)).stem.replace('yolo', 'YOLO')
+        try:
+            self.pretty_name = Path(self.model.yaml.get('yaml_file', self.file)).stem.replace('yolo', 'YOLO')
+        except:
+            self.pretty_name = Path("./export_model").stem.replace('yolo', 'YOLO')
         trained_on = f'trained on {Path(self.args.data).name}' if self.args.data else '(untrained)'
         description = f'Ultralytics {self.pretty_name} model {trained_on}'
         self.metadata = {
