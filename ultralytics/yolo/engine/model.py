@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from typing import Union
 
+from copy import deepcopy
+
 from ultralytics import yolo  # noqa
 from ultralytics.nn.tasks import (ClassificationModel, ClassificationModel_netspresso, DetectionModel, DetectionModel_netspresso,
                                   PoseModel, PoseModel_netspresso, SegmentationModel, SegmentationModel_netspresso,
@@ -291,7 +293,7 @@ class YOLO:
         """
         Validate a model on a given dataset.
 
-        Args:
+        Args:›
             data (str): The dataset to validate on. Accepts all formats accepted by yolo
             **kwargs : Any other args accepted by the validators. To see all args check 'configuration' section in docs
         """
@@ -603,14 +605,15 @@ class YOLO_netspresso(YOLO):
         cfg_dict = yaml_model_load(meta_config)
         self.cfg = meta_config
         self.model = TASK_MAP[self.task][0](graph_model_path=compressed_weights, meta_head_json=head_meta)  # build model
-        self.overrides['model'] = self.cfg
 
         # Below added to allow export from yamls
-        args = {**DEFAULT_CFG_DICT, **self.overrides}  # combine model and default args, preferring model args
+        args = {**DEFAULT_CFG_DICT, **cfg_dict}  # combine model and default args, preferring model args
         self.model.args = {k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS}  # attach args to model
         self.model.task = self.task
+        self.overrides['model'] = self.cfg
         self.overrides['task'] = self.task
-
+        self.overrides['data'] = args["data"]
+        
     def train(self, **kwargs):
         """
         Trains the model on a given dataset.
@@ -640,3 +643,32 @@ class YOLO_netspresso(YOLO):
             self.model, _ = attempt_load_one_weight(str(self.trainer.best))
             self.overrides = self.model.args
             self.metrics = getattr(self.trainer.validator, 'metrics', None)  # TODO: no metrics returned by DDP
+    
+    @smart_inference_mode()    
+    def val(self, data=None, **kwargs):
+        """
+        Validate a model on a given dataset.
+
+        Args:
+            data (str): The dataset to validate on. Accepts all formats accepted by yolo
+            **kwargs : Any other args accepted by the validators. To see all args check 'configuration' section in docs
+        """
+        overrides = self.overrides.copy()
+        overrides['rect'] = True  # rect batches as default
+        overrides.update(kwargs)
+        overrides['mode'] = 'val'
+        args = get_cfg(cfg=DEFAULT_CFG, overrides=overrides)
+        args.data = data or args.data
+        if 'task' in overrides:
+            self.task = args.task
+        else:
+            args.task = self.task
+        if args.imgsz == DEFAULT_CFG.imgsz and not isinstance(self.model, (str, Path)):
+            args.imgsz = self.model.args['imgsz']  # use trained imgsz unless custom value is passed
+        args.imgsz = check_imgsz(args.imgsz, max_dim=1)
+
+        validator = TASK_MAP[self.task][2](args=args, _callbacks=self.callbacks)
+        validator(model=deepcopy(self.model))
+        self.metrics = validator.metrics
+
+        return validator.metrics
