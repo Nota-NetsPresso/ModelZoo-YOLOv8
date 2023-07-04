@@ -696,7 +696,7 @@ def get_settings(file=SETTINGS_YAML, version='0.0.3'):
         'sync': True,  # sync analytics to help with YOLO development
         'api_key': '',  # Ultralytics HUB API key (https://hub.ultralytics.com/)
         'settings_version': version}  # Ultralytics settings version
-
+    
     with torch_distributed_zero_first(RANK):
         if not file.exists():
             yaml_save(file, defaults)
@@ -714,6 +714,11 @@ def get_settings(file=SETTINGS_YAML, version='0.0.3'):
                            f"\nView and update settings with 'yolo settings' or at '{file}'")
             settings = defaults  # merge **defaults with **settings (prefer **settings)
             yaml_save(file, settings)  # save updated defaults
+        
+        # Rename the storage space to the name of the repo
+        # Or you can reset the setting.yaml file (ultralytics -> ultralytics_nota)
+        settings['runs_dir'] = defaults['runs_dir']
+        settings['weights_dir'] = defaults['weights_dir']
 
         return settings
 

@@ -13,7 +13,7 @@ from ultralytics.nn.tasks import (ClassificationModel, ClassificationModel_netsp
 from ultralytics.yolo.cfg import get_cfg
 from ultralytics.yolo.engine.exporter import Exporter
 from ultralytics.yolo.utils import (DEFAULT_CFG, DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, RANK, ROOT, callbacks,
-                                    is_git_dir, yaml_load)
+                                    is_git_dir, yaml_load, yaml_save)
 from ultralytics.yolo.utils.checks import check_file, check_imgsz, check_pip_update_available, check_yaml
 from ultralytics.yolo.utils.downloads import GITHUB_ASSET_STEMS
 from ultralytics.yolo.utils.torch_utils import smart_inference_mode
@@ -177,6 +177,13 @@ class YOLO:
             self.ckpt_path = weights
         self.overrides['model'] = weights
         self.overrides['task'] = self.task
+        
+    def get_yaml(self, cfg=DEFAULT_CFG, save_dir= '.'):
+        overrides = self.overrides.copy()
+        self.args = get_cfg(cfg, overrides)
+        if RANK in (-1, 0):
+            self.args.save_dir = save_dir
+            yaml_save(f"{save_dir}/args.yaml", vars(self.args))  # save run args
 
     def _check_is_pytorch_model(self):
         """
@@ -352,23 +359,25 @@ class YOLO:
         args.task = self.task
         return Exporter(overrides=args, _callbacks=self.callbacks)(model=self.model)
     
-    def export_netspresso(self):
+    def export_netspresso(self, save_path: str = '.'):
         """
         Export model for NetsPresso.
         """
         self._check_is_pytorch_model()
-        #model_model 부분 torchfx로 변환 저장
+        
         import torch
         import torch.fx as fx
         import json
         
+        # save model_fx
         self.model.train()
-        _graph = fx.Tracer().trace(self.model, {'augment': False, 'profile':False, 'visualize':False})
-        traced_model = fx.GraphModule(self.model, _graph)
-        torch.save(traced_model, "./model_fx.pt")
+        model = deepcopy(self.model).float()
+        _graph = fx.Tracer().trace(model, {'augment': False, 'profile':False, 'visualize':False})
+        traced_model = fx.GraphModule(model, _graph)
+        torch.save(traced_model, f"{save_path}/model_fx.pt")
         
-        #head 부분에 대한 config 저장
-        model_head = self.model.model[-1]
+        # savd head config
+        model_head = deepcopy(self.model.model[-1]).float()
         
         if 'classify' in self.task:
             task_name = 'classify'
@@ -379,9 +388,13 @@ class YOLO:
         elif 'pose' in self.task:
             task_name = 'pose'
             
-        total_dict = {'classify':['nc', 'stride'],  'detect':['nc', 'nl', 'anchors', 'stride', 'strides', 'inplace'],
+        total_dict = {'classify':['stride', 'names'],  'detect':['nc', 'nl', 'anchors', 'stride', 'strides', 'inplace'],
                       'segment' : ['nm', 'npr', 'nc', 'nl', 'anchors', 'stride', 'strides', 'inplace'],
                       'pose' : ['kpt_shape', 'nc', 'nl', 'anchors', 'stride', 'strides', 'inplace']}
+        
+        if task_name == 'classify':
+            model_head = deepcopy(self.model).float()
+            
         
         attribute_list = total_dict[task_name]
         head_meta = {}
@@ -395,7 +408,7 @@ class YOLO:
                 else:
                     head_meta[attribute] = temp_attribute
             
-        with open('./netspresso_head_meta.json', 'w') as f:
+        with open(f'{save_path}/netspresso_head_meta.json', 'w') as f:
             json.dump(head_meta, f, indent=2)
             
         model_head.training = True
@@ -604,8 +617,9 @@ class YOLO_netspresso(YOLO):
         
         cfg_dict = yaml_model_load(meta_config)
         self.cfg = meta_config
+        
         self.model = TASK_MAP[self.task][0](graph_model_path=compressed_weights, meta_head_json=head_meta)  # build model
-
+        
         # Below added to allow export from yamls
         args = {**DEFAULT_CFG_DICT, **cfg_dict}  # combine model and default args, preferring model args
         self.model.args = {k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS}  # attach args to model
@@ -672,3 +686,97 @@ class YOLO_netspresso(YOLO):
         self.metrics = validator.metrics
 
         return validator.metrics
+    
+    def export_netspresso(self, save_path: str = "."):
+        """
+        Export model for NetsPresso.
+        """
+        self._check_is_pytorch_model()
+        import torch
+        import torch.fx as fx
+        import json
+        
+        model = deepcopy(self.model.model[0]).float()
+        
+        torch.save(model, f"{save_path}/model_fx.pt")
+        
+        model_head = deepcopy(self.model.model[-1]).float()
+        
+        if 'classify' in self.task:
+            task_name = 'classify'
+        elif 'detect' in self.task:
+            task_name = 'detect'
+        elif 'segment' in self.task:
+            task_name = 'segment'
+        elif 'pose' in self.task:
+            task_name = 'pose'
+            
+        total_dict = {'classify':['stride', 'names'],  'detect':['nc', 'nl', 'anchors', 'stride', 'strides', 'inplace'],
+                      'segment' : ['nm', 'npr', 'nc', 'nl', 'anchors', 'stride', 'strides', 'inplace'],
+                      'pose' : ['kpt_shape', 'nc', 'nl', 'anchors', 'stride', 'strides', 'inplace']}
+        
+        if task_name == 'classify':
+            model_head = self.model
+            
+        attribute_list = total_dict[task_name]
+        head_meta = {}
+        for attribute in attribute_list:
+            if attribute == 'inplace':
+                head_meta[attribute] = True
+            else:
+                temp_attribute = getattr(model_head, attribute)
+                if isinstance(temp_attribute, torch.Tensor):
+                    head_meta[attribute] = temp_attribute.cpu().numpy().tolist()
+                else:
+                    head_meta[attribute] = temp_attribute
+            
+        with open(f'{save_path}/netspresso_head_meta.json', 'w') as f:
+            json.dump(head_meta, f, indent=2)
+            
+        model_head.training = True
+        
+
+def export_netspresso(model: str, save_path: str= "."):
+        import torch
+        import torch.fx as fx
+        import json
+        
+        model = torch.load(model)["model"]
+        model = deepcopy(model).float()
+        
+        torch.save(model.model[0], f"{save_path}/model_fx3.pt")
+        
+        model_head = model.model[-1]
+        
+        if 'Classification' in model.__class__.__name__:
+            task_name = 'classify'
+        elif 'Detection' in model.__class__.__name__:
+            task_name = 'detect'
+        elif 'Segmentation' in model.__class__.__name__:
+            task_name = 'segment'
+        elif 'Pose' in model.__class__.__name__:
+            task_name = 'pose'
+        
+        total_dict = {'classify':['stride', 'names'],  'detect':['nc', 'nl', 'anchors', 'stride', 'strides', 'inplace'],
+                      'segment' : ['nm', 'npr', 'nc', 'nl', 'anchors', 'stride', 'strides', 'inplace'],
+                      'pose' : ['kpt_shape', 'nc', 'nl', 'anchors', 'stride', 'strides', 'inplace']}
+        
+        if task_name == 'classify':
+            model_head = model
+            
+        attribute_list = total_dict[task_name]
+        head_meta = {}
+        for attribute in attribute_list:
+            if attribute == 'inplace':
+                head_meta[attribute] = True
+            else:
+                temp_attribute = getattr(model_head, attribute)
+                if isinstance(temp_attribute, torch.Tensor):
+                    head_meta[attribute] = temp_attribute.cpu().numpy().tolist()
+                else:
+                    head_meta[attribute] = temp_attribute
+            
+        with open(f'{save_path}/netspresso_head_meta3.json', 'w') as f:
+            json.dump(head_meta, f, indent=2)
+            
+        model_head.training = True

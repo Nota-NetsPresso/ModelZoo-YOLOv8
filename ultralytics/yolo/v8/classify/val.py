@@ -14,7 +14,10 @@ class ClassificationValidator(BaseValidator):
     def __init__(self, dataloader=None, save_dir=None, pbar=None, args=None, _callbacks=None):
         """Initializes ClassificationValidator instance with args, dataloader, save_dir, and progress bar."""
         super().__init__(dataloader, save_dir, pbar, args, _callbacks)
-        self.args.task = 'classify'
+        if self.args.task in ('classify', 'classify_retraining'):
+            self.args.task = self.args.task
+        else:
+            self.args.task = 'classify'
         self.metrics = ClassifyMetrics()
 
     def get_desc(self):

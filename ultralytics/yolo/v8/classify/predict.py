@@ -11,7 +11,10 @@ class ClassificationPredictor(BasePredictor):
 
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
         super().__init__(cfg, overrides, _callbacks)
-        self.args.task = 'classify'
+        if overrides['task'] in ('classify', 'classify_retraining'):
+            self.args.task = overrides['task']
+        else:
+            self.args.task = 'classify'
 
     def preprocess(self, img):
         """Converts input image to model-compatible data type."""

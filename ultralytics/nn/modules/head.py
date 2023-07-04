@@ -146,11 +146,13 @@ class Segment_netspresso(Detect_netspresso):
         super().__init__(nc, nl=nl, anchors=anchors, strides=strides, stride=stride)
         self.nm = nm  # number of masks
         self.npr = npr  # number of protos
+        self.detect = Detect_netspresso.forward
         
 
     def forward(self, x):
         """Return model outputs and mask coefficients if training, otherwise return outputs and mask coefficients."""
         x, mc, p  = x
+        x = self.detect(self, x)
         
         if self.training:
             return x, mc, p
@@ -206,10 +208,12 @@ class Pose_netspresso(Detect_netspresso):
         super().__init__(nc, nl=nl, anchors=anchors, strides=strides, stride=stride)
         self.kpt_shape = kpt_shape  # number of keypoints, number of dims (2 for x,y or 3 for x,y,visible)
         self.nk = kpt_shape[0] * kpt_shape[1]  # number of keypoints total
+        self.detect = Detect_netspresso.forward
 
     def forward(self, x):
         """Perform forward pass through YOLO model and return predictions."""
         x, kpt = x
+        x = self.detect(self, x)
         bs = x[0].shape[0]  # batch size
         if self.training:
             return x, kpt

@@ -441,13 +441,17 @@ class ClassificationModel_netspresso(BaseModel):
         self.json_head = netspresso_head_meta
 
         # Define model
-        self.nc = self.json_head['nc']
+        self.inplace = self.json_head.get('inplace', True)
         self.stride = torch.Tensor(self.json_head['stride'])
         self.model = torch.load(graph_model_path)
-        self.names = {i: f'{i}' for i in range(self.nc)}  # default names dict
+        self.names = self.json_head['names']  # default names dict
         
         self.head = Classify_netspresso()
-        self.model = nn.Sequential(self.model,self.head)
+        self.model = nn.Sequential(self.model, self.head)
+        
+    def forward(self, x, augment=False, profile=False, visualize=False):
+        """Run forward pass on input image(s) with optional augmentation and profiling."""
+        return self.model(x)
 
     @staticmethod
     def reshape_outputs(model, nc):
