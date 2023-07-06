@@ -17,7 +17,10 @@ class PoseValidator(DetectionValidator):
     def __init__(self, dataloader=None, save_dir=None, pbar=None, args=None, _callbacks=None):
         """Initialize a 'PoseValidator' object with custom parameters and assigned attributes."""
         super().__init__(dataloader, save_dir, pbar, args, _callbacks)
-        self.args.task = 'pose'
+        if self.args.task in ('pose', 'pose_retraining'):
+            self.args.task = self.args.task
+        else:
+            self.args.task = 'pose'
         self.metrics = PoseMetrics(save_dir=self.save_dir, on_plot=self.on_plot)
 
     def preprocess(self, batch):

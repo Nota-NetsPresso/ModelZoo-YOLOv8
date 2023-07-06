@@ -21,7 +21,10 @@ class DetectionValidator(BaseValidator):
     def __init__(self, dataloader=None, save_dir=None, pbar=None, args=None, _callbacks=None):
         """Initialize detection model with necessary variables and settings."""
         super().__init__(dataloader, save_dir, pbar, args, _callbacks)
-        self.args.task = 'detect'
+        if self.args.task in ('detect', 'detect_retraining'):
+            self.args.task = self.args.task
+        else:
+            self.args.task = 'detect'
         self.is_coco = False
         self.class_map = None
         self.metrics = DetMetrics(save_dir=self.save_dir, on_plot=self.on_plot)

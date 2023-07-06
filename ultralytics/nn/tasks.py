@@ -316,7 +316,7 @@ class SegmentationModel_netspresso(DetectionModel_netspresso):
         self.head = Segment_netspresso(nc=nc, nm=nm, npr=npr, nl=nl, anchors=anchors, strides=strides, stride=stride)
         
         # Build new model for retraining
-        self.model = nn.Sequential(self.model,self.head).cuda()
+        self.model = nn.Sequential(self.model, self.head).cuda()
 
     def _forward_augment(self, x):
         """Undocumented function."""

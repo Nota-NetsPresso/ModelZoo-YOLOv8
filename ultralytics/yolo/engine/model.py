@@ -370,14 +370,15 @@ class YOLO:
         import json
         
         # save model_fx
-        self.model.train()
         model = deepcopy(self.model).float()
+        model.train()
         _graph = fx.Tracer().trace(model, {'augment': False, 'profile':False, 'visualize':False})
         traced_model = fx.GraphModule(model, _graph)
         torch.save(traced_model, f"{save_path}/model_fx.pt")
         
         # savd head config
         model_head = deepcopy(self.model.model[-1]).float()
+        model_head.train()
         
         if 'classify' in self.task:
             task_name = 'classify'
@@ -394,8 +395,8 @@ class YOLO:
         
         if task_name == 'classify':
             model_head = deepcopy(self.model).float()
+            model_head.train()
             
-        
         attribute_list = total_dict[task_name]
         head_meta = {}
         for attribute in attribute_list:
@@ -645,9 +646,7 @@ class YOLO_netspresso(YOLO):
         overrides['mode'] = 'train'
         if not overrides.get('data'):
             raise AttributeError("Dataset required but missing, i.e. pass 'data=coco128.yaml'")
-        if overrides.get('resume'):
-            overrides['resume'] = self.ckpt_path
-        self.task = self.task or overrides.get('task')
+        self.task = self.task
         self.trainer = TASK_MAP[self.task][1](overrides=overrides, _callbacks=self.callbacks)
         self.trainer.model = self.model
         self.trainer.hub_session = self.session  # attach optional HUB session

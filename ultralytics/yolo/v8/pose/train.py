@@ -24,7 +24,10 @@ class PoseTrainer(v8.detect.DetectionTrainer):
         """Initialize a PoseTrainer object with specified configurations and overrides."""
         if overrides is None:
             overrides = {}
-        overrides['task'] = 'pose'
+        if overrides['task'] in ('pose', 'pose_retraining'):
+            overrides['task'] = overrides['task']
+        else:
+            overrides['task'] = 'pose'
         super().__init__(cfg, overrides, _callbacks)
 
     def get_model(self, cfg=None, weights=None, verbose=True):

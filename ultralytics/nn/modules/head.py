@@ -213,8 +213,8 @@ class Pose_netspresso(Detect_netspresso):
     def forward(self, x):
         """Perform forward pass through YOLO model and return predictions."""
         x, kpt = x
-        x = self.detect(self, x)
         bs = x[0].shape[0]  # batch size
+        x = self.detect(self, x)
         if self.training:
             return x, kpt
         pred_kpt = self.kpts_decode(bs, kpt)

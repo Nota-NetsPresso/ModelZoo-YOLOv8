@@ -21,7 +21,10 @@ class SegmentationTrainer(v8.detect.DetectionTrainer):
         """Initialize a SegmentationTrainer object with given arguments."""
         if overrides is None:
             overrides = {}
-        overrides['task'] = 'segment'
+        if overrides['task'] in ('segment', 'segment_retraining'):
+            overrides['task'] = overrides['task']
+        else:
+            overrides['task'] = 'segment'
         super().__init__(cfg, overrides, _callbacks)
 
     def get_model(self, cfg=None, weights=None, verbose=True):
