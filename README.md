@@ -1,7 +1,7 @@
 <div align="center">
   <p>
-    <a align="center">
-      <img width="100%" src="./imgs/yolov8_banner2.png"></a>
+    <a align="center" target="_blank">
+      <img width="100%" src="https://github.com/Nota-NetsPresso/NetsPresso-Compatible-Models/blob/main/imgs/banner/YOLOv8_banner.png"></a>
   </p>
 
 </div>
