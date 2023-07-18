@@ -140,6 +140,8 @@ In the location of '/ultralytics_nota/netspresso_head_meta.json', enter the path
 In place of 'detect_retraining', enter '[classify, detect, segment, pose]_retraining'.
 In the last option, enter the path to the yaml where you have entered the settings required for training. </br>
 ```python
+from ultralytics import YOLO_netspresso
+
 model = YOLO_netspresso('/ultralytics_nota/compressed_model.pt', '/ultralytics_nota/netspresso_head_meta.json', 'detect_retraining', '/ultralytics_nota/new_args.yaml')
 
 model.train(data='coco128.yaml', epochs=100, imgsz=640)
