@@ -1,9 +1,11 @@
+import os
 import argparse
 
+import yaml
 from loguru import logger
 from netspresso.compressor import ModelCompressor, Task, Framework
 
-from ultralytics import YOLO
+from ultralytics import YOLO, YOLO_netspresso
 
 
 def parse_args():
@@ -23,6 +25,12 @@ def parse_args():
     parser.add_argument("--compression_ratio", type=int, default=0.5)
     parser.add_argument("-m", "--np_email", help="NetsPresso login e-mail", type=str)
     parser.add_argument("-p", "--np_password", help="NetsPresso login password", type=str)
+
+    """
+        Fine-tuning arguments
+    """
+    parser.add_argument('--data', type=str, default='./ultralytics/datasets/coco128.yaml', help='model.yaml path')
+    parser.add_argument('--epochs', type=int, default=100, help='retrain epoch')
 
     return parser.parse_args()
 
@@ -78,3 +86,20 @@ if __name__ == '__main__':
     )
 
     logger.info("Compression step end.")
+
+    """
+        Retrain YOLOv7 model
+    """
+    logger.info("Fine-tuning step start.")
+
+    with open('tmp_cfg.yaml', 'w') as f:
+        yaml.dump(model.ckpt['train_args'], f)
+
+    lr = model.ckpt['train_args']['lr0'] * 0.1
+    model = YOLO_netspresso(OUTPUT_PATH, './netspresso_head_meta.json', model_args['task'] + '_retraining', 'tmp_cfg.yaml')
+    os.remove('tmp_cfg.yaml')
+
+    model.train(data=args.data, epochs=args.epochs, lr0=lr)
+    metrics = model.val(data=args.data)
+
+    logger.info("Fine-tuning step end.")
