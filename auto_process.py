@@ -1,5 +1,6 @@
 import os
 import argparse
+import shutil
 
 import yaml
 from loguru import logger
@@ -63,7 +64,7 @@ if __name__ == '__main__':
     FRAMEWORK = Framework.PYTORCH
     UPLOAD_MODEL_PATH = 'model_fx.pt'
     INPUT_SHAPES = [{"batch": 1, "channel": 3, "dimension": (model_args['imgsz'], model_args['imgsz'])}]
-    model = compressor.upload_model(
+    upload_model = compressor.upload_model(
         model_name=UPLOAD_MODEL_NAME,
         task=TASK,
         framework=FRAMEWORK,
@@ -77,7 +78,7 @@ if __name__ == '__main__':
     COMPRESSED_MODEL_NAME = f'{UPLOAD_MODEL_NAME}_{COMPRESSION_METHOD}_{RECOMMENDATION_RATIO}'
     OUTPUT_PATH = COMPRESSED_MODEL_NAME + '.pt'
     compressed_model = compressor.recommendation_compression(
-        model_id=model.model_id,
+        model_id=upload_model.model_id,
         model_name=COMPRESSED_MODEL_NAME,
         compression_method=COMPRESSION_METHOD,
         recommendation_method=RECOMMENDATION_METHOD,
@@ -88,7 +89,7 @@ if __name__ == '__main__':
     logger.info("Compression step end.")
 
     """
-        Retrain YOLOv7 model
+        Retrain YOLOv8 model
     """
     logger.info("Fine-tuning step start.")
 
@@ -103,3 +104,16 @@ if __name__ == '__main__':
     metrics = model.val(data=args.data)
 
     logger.info("Fine-tuning step end.")
+
+    """
+        Export YOLOv8 model to onnx
+    """
+    logger.info("Export model to onnx format step start.")
+
+    best_model = YOLO(model.trainer.save_dir / 'weights' / 'best.pt')
+    path = best_model.export(format="onnx")
+
+    shutil.copy(path, COMPRESSED_MODEL_NAME + '.onnx')
+    logger.info(f'=> saving model to {COMPRESSED_MODEL_NAME}.onnx')
+
+    logger.info("Export model to onnx format step end.")
