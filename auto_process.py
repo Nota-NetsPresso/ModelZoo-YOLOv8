@@ -17,6 +17,7 @@ def parse_args():
     """
     parser.add_argument('-n', '--name', type=str, default='yolov8n', help='model name')
     parser.add_argument('-w', '--weights', type=str, default='./yolov8n.pt', help='weights path')
+    parser.add_argument('--config', type=str, default='', help='custom config path')
 
     """
         Compression arguments
@@ -93,8 +94,11 @@ if __name__ == '__main__':
     """
     logger.info("Fine-tuning step start.")
 
-    with open('tmp_cfg.yaml', 'w') as f:
-        yaml.dump(model.ckpt['train_args'], f)
+    if args.config == '':
+        with open('tmp_cfg.yaml', 'w') as f:
+            yaml.dump(model.ckpt['train_args'], f)
+    else:
+        shutil.copy(args.config, 'tmp_cfg.yaml')
 
     lr = model.ckpt['train_args']['lr0'] * 0.1
     model = YOLO_netspresso(OUTPUT_PATH, './netspresso_head_meta.json', model_args['task'] + '_retraining', 'tmp_cfg.yaml')
