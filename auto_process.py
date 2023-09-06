@@ -33,6 +33,7 @@ def parse_args():
     """
     parser.add_argument('--data', type=str, default='./ultralytics/datasets/coco128.yaml', help='model.yaml path')
     parser.add_argument('--epochs', type=int, default=100, help='retrain epoch')
+    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
 
     return parser.parse_args()
 
@@ -95,6 +96,7 @@ if __name__ == '__main__':
     logger.info("Fine-tuning step start.")
 
     if args.config == '':
+        model.ckpt['train_args']['device'] = ''
         with open('tmp_cfg.yaml', 'w') as f:
             yaml.dump(model.ckpt['train_args'], f)
     else:
@@ -104,7 +106,7 @@ if __name__ == '__main__':
     model = YOLO_netspresso(OUTPUT_PATH, './netspresso_head_meta.json', model_args['task'] + '_retraining', 'tmp_cfg.yaml')
     os.remove('tmp_cfg.yaml')
 
-    model.train(data=args.data, epochs=args.epochs, lr0=lr)
+    model.train(data=args.data, epochs=args.epochs, lr0=lr, device=args.device)
     metrics = model.val(data=args.data)
 
     logger.info("Fine-tuning step end.")
