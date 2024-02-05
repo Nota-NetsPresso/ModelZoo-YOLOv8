@@ -8,10 +8,15 @@
 
 # <div align="center">NetsPresso Tutorial for YOLOv8 Compressrion</div>
 ## Order of the tutorial
+[0. Sign up](#0-sign-up) </br>
 [1. Install](#1-install) </br>
 [2. Convert yolov8 to _torchfx.pt](#2-convert-yolov8-to-_torchfxpt) </br>
 [3. Model Compression with NetsPresso API Package](#3-model-compression-with-netspresso-api-package) </br>
 [4. Fine-tuning the compressed Model](#4-fine-tuning-the-compressed-model) </br>
+</br>
+
+## 0. Sign up
+To get started with the NetsPresso Python package, you will need to sign up at <a href="https://netspresso.ai/?utm_source=git_yolo&utm_medium=text_np&utm_campaign=np_renew" target="_blank">NetsPresso</a>.
 </br>
 
 ## 1. Install
